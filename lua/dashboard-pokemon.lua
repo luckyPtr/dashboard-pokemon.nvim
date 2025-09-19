@@ -13,35 +13,29 @@ local function get_dominant_color(file_path)
   if not file_path or vim.fn.filereadable(file_path) == 0 then
     return "247,214,55"
   end
-
   local content = table.concat(vim.fn.readfile(file_path), "\n")
   local color_counts = {}
-
   for color_seq, blocks in content:gmatch("%[38;2;([%d;]+)m(██+)") do
     local r, g, b = color_seq:match("([%d]+);([%d]+);([%d]+)")
     if r and g and b then
       r, g, b = tonumber(r), tonumber(g), tonumber(b)
-      if not ((r == g and r == b) or (r < 25 and g < 25 and b < 25)) then
-        local color_key = r .. "," .. g .. "," .. b
-        local block_count = math.floor(#blocks / 2)
-        color_counts[color_key] = (color_counts[color_key] or 0) + block_count
+      if not (r == g and r == b) then
+        local key = r .. "," .. g .. "," .. b
+        local count = math.floor(#blocks / 2)
+        color_counts[key] = (color_counts[key] or 0) + count
       end
     end
   end
-
-  local max_count = 0
-  local dominant_color = "247,214,55"
-  for color, count in pairs(color_counts) do
-    if count > max_count then
-      max_count = count
-      dominant_color = color
+  local maxc, dom = 0, "247,214,55"
+  for color, cnt in pairs(color_counts) do
+    if cnt > maxc then
+      maxc, dom = cnt, color
     end
   end
-
-  return dominant_color
+  return dom
 end
 
-local function build_dashboard_cfg()
+local function build_frame_ctx()
   local frame_file = pick_runtime_frame()
   local dominant_color = "247,214,55"
   local frame_width, frame_height = 48, 24
@@ -60,80 +54,90 @@ local function build_dashboard_cfg()
   if frame_file then
     frame_cmd = string.format([[
 powershell -NoLogo -Command "[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-Content -Raw -Encoding UTF8 '%s'"]]
-    , frame_file:gsub("'", "''"))
+      , frame_file:gsub("'", "''"))
   else
     frame_cmd = [[powershell -NoLogo -Command "Write-Host 'No frames found in runtime path'"]]
   end
 
   local frame_filename = frame_file and vim.fn.fnamemodify(frame_file, ":t:r") or "No frame file"
 
-  -- 设置高亮（不依赖 snacks）
-  local r, g, b = dominant_color:match("([%d]+),([%d]+),([%d]+)")
-  if r and g and b then
-    local hex = string.format("#%02x%02x%02x", tonumber(r), tonumber(g), tonumber(b))
-    local function set_hl()
-      vim.api.nvim_set_hl(0, "PokemonName", { fg = hex, bold = true })
+  return {
+    cmd = frame_cmd,
+    width = frame_width,
+    height = frame_height,
+    filename = frame_filename,
+    color = dominant_color,
+  }
+end
+
+-- 只改样式与在“已存在 sections 表”时追加 terminal；不创建/覆盖 sections
+function M.patch_snacks_opts(opts)
+  opts = opts or {}
+  opts.dashboard = opts.dashboard or {}
+
+  local ctx = build_frame_ctx()
+
+  -- 高亮（不依赖 snacks）
+  do
+    local r, g, b = ctx.color:match("([%d]+),([%d]+),([%d]+)")
+    if r and g and b then
+      local hex = string.format("#%02x%02x%02x", tonumber(r), tonumber(g), tonumber(b))
+      local function set_hl()
+        vim.api.nvim_set_hl(0, "PokemonName", { fg = hex, bold = true })
+      end
+      set_hl()
+      local grp = vim.api.nvim_create_augroup("DashboardPokemonHL", { clear = true })
+      vim.api.nvim_create_autocmd("ColorScheme", { group = grp, callback = set_hl })
     end
-    set_hl()
-    vim.api.nvim_create_autocmd("ColorScheme", { callback = set_hl })
   end
 
-  local dashboard_cfg = {
-    dashboard = {
-      preset = {
-        header = [[
+  -- 仅设置 header 的格式（颜色/居中），不强行覆盖字符串预设
+  opts.dashboard.formats = opts.dashboard.formats or {}
+  opts.dashboard.formats.header = { "%s", hl = "PokemonName", align = "center" }
+
+  if type(opts.dashboard.preset) == "table" then
+    opts.dashboard.preset.header = [[
 ██████╗  ██████╗ ██╗  ██╗███████╗███╗   ███╗ ██████╗ ███╗   ██╗
 ██╔══██╗██╔═══██╗██║ ██╔╝██╔════╝████╗ ████║██╔═══██╗████╗  ██║
 ██████╔╝██║   ██║█████╔╝ █████╗  ██╔████╔██║██║   ██║██╔██╗ ██║
 ██╔═══╝ ██║   ██║██╔═██╗ ██╔══╝  ██║╚██╔╝██║██║   ██║██║╚██╗██║
 ██║     ╚██████╔╝██║  ██╗███████╗██║ ╚═╝ ██║╚██████╔╝██║ ╚████║
-╚═╝      ╚═════╝ ╚═╝  ╚═╝╚══════╝╚═╝     ╚═╝ ╚═════╝ ╚═╝  ╚═══╝]],
-      },
-      formats = {
-        header = { "%s", hl = "PokemonName", align = "center" },
-      },
-      sections = {
-        { section = "header", pane = 1 },
-        { icon = "󰊓 ", title = frame_filename, gap = 1, padding = 1, hl = "Title" },
-        { section = "keys", gap = 1, padding = 1 },
-        { section = "startup" },
-        {
-          section = "terminal",
-          cmd = frame_cmd,
-          pane = 2,
-          indent = 10,
-          width = frame_width,
-          height = frame_height,
-        },
-      },
-    },
-  }
-
-  return dashboard_cfg
-end
-
--- 导出供 lazy.nvim 作为 dependency.opts 使用
-function M.get_dashboard_cfg()
-  return build_dashboard_cfg()
-end
-
--- 向后兼容：如果有人直接调用 setup，则做受保护调用（避免重复报错）
-function M.setup()
-  local ok, snacks = pcall(require, "snacks")
-  if not ok then
-    vim.notify("dashboard-pokemon: 无法加载 snacks.nvim，跳过 setup", vim.log.levels.WARN)
-    return
+╚═╝      ╚═════╝ ╚═╝  ╚═╝╚══════╝╚═╝     ╚═╝ ╚═════╝ ╚═╝  ╚═══╝]]
   end
-  local cfg = build_dashboard_cfg()
-  local ok2, err = pcall(function() snacks.setup(cfg) end)
-  if not ok2 then
-    -- 忽略已 setup 的错误
-    if tostring(err):match("already") then
-      vim.notify("dashboard-pokemon: snacks 已经 setup，跳过重复初始化", vim.log.levels.INFO)
-    else
-      vim.notify("dashboard-pokemon: setup 出错: " .. tostring(err), vim.log.levels.ERROR)
+
+  -- sections：已有则只追加 terminal；没有则提供最小默认 + terminal
+  local function ensure_terminal(sections)
+    local has_terminal = false
+    for _, s in ipairs(sections) do
+      if s.section == "terminal" then
+        has_terminal = true
+        break
+      end
+    end
+    if not has_terminal then
+      table.insert(sections, {
+        section = "terminal",
+        cmd = ctx.cmd,
+        pane = 2,
+        indent = 10,
+        width = ctx.width,
+        height = ctx.height,
+      })
     end
   end
+
+  if type(opts.dashboard.sections) == "table" then
+    ensure_terminal(opts.dashboard.sections)
+  else
+    opts.dashboard.sections = {
+      { section = "header", pane = 1 },
+      { section = "keys", gap = 1, padding = 1 },
+      { section = "startup" },
+    }
+    ensure_terminal(opts.dashboard.sections)
+  end
+
+  return opts
 end
 
 return M
