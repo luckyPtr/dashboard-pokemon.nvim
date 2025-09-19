@@ -1,6 +1,6 @@
 # dashboard-pokemon.nvim
 
-在 snacks.nvim 的 Dashboard 上显示一只随机宝可梦，仿照snacks.nvim的 [dashboard.md](https://github.com/folke/snacks.nvim/blob/main/docs/dashboard.md) 的pokemon示例的Windows实现，使用 Powshell 直接输出，无效额外配置
+在 snacks.nvim 的 Dashboard 上显示一只随机宝可梦，仿照snacks.nvim [pokemon示例](https://github.com/folke/snacks.nvim/blob/main/docs/dashboard.md) 的Windows实现，使用 PowerShell 直接输出，无需额外配置
 
 ANSI彩色ASCII素材来自 [pokemon-colorscripts](https://github.com/Findarato/pokemon-colorscripts)
 
